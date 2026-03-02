@@ -30,7 +30,7 @@ The goal of this proof of concept is to validate that AI-assisted structured doc
 
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 **Frontend**
 - React
