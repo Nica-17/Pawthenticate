@@ -1,0 +1,17 @@
+# Node modules (both client & server)
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+**/.env
+
+# Firebase service account
+pawthenticate-server/firebase-service-account.json
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
