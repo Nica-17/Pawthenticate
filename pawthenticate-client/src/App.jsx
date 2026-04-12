@@ -12,21 +12,11 @@ const SECTION_ORDER = [
   "Plan",
 ]
 
-const DEMO_SUMMARY = {
-  Signalment: "Canine, 9y MN Golden Retriever. 34.2 kg.",
-  "Presenting Complaint": "Lethargy and decreased appetite for 3 days.",
-  History: "Hx: splenic mass s/p splenectomy (2024). On prednisone taper. No vomiting/diarrhea noted.",
-  Diagnostics: "CBC: mild anemia. Chem: mildly elevated ALT. Abdominal US: mild hepatomegaly.",
-  Treatments: "IV fluids, maropitant, appetite stimulant started. Continue prednisone taper as prescribed.",
-  Assessment: "Suspected inflammatory flare vs medication effect; monitor anemia and liver values.",
-  Plan: "Recheck CBC/Chem in 7 days. Appetite/energy log. Return sooner if vomiting, collapse, or anorexia persists.",
-}
-
 function SectionCard({ title, body }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-4">
       <div className="text-sm font-semibold text-white/90">{title}</div>
-      <div className="mt-2 text-sm leading-relaxed text-white/70 whitespace-pre-wrap">
+      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-white/70">
         {body || "—"}
       </div>
     </div>
@@ -38,8 +28,11 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [summary, setSummary] = useState(null)
   const [saveStatus, setSaveStatus] = useState(null)
+  const [errorMessage, setErrorMessage] = useState("")
 
-  const canGenerate = useMemo(() => recordText.trim().length > 30 && !isLoading, [recordText, isLoading])
+  const canGenerate = useMemo(() => {
+    return recordText.trim().length > 30 && !isLoading},
+    [recordText, isLoading])
 
   function inferSpeciesFromSignalment(signalment) {
   if (!signalment) return "";
@@ -50,18 +43,20 @@ export default function App() {
   return "";
 }
 
-function inferPatientName(recordText) {
+function inferPatientName(text) {
   // quick PoC heuristic: look for "Patient: NAME" or "Name: NAME"
-  const m =
-    recordText.match(/patient\s*:\s*([^\n\r]+)/i) ||
-    recordText.match(/name\s*:\s*([^\n\r]+)/i);
-  return m ? m[1].trim().slice(0, 60) : "";
+  const match =
+    text.match(/patient\s*:\s*([^\n\r]+)/i) ||
+    text.match(/name\s*:\s*([^\n\r]+)/i);
+  return match ? match[1].trim().slice(0, 60) : "";
 }
 
   async function handleGenerate() {
   try {
     setIsLoading(true)
     setSummary(null)
+    setSaveStatus(null)
+    setErrorMessage("")
 
     const res = await fetch(`${API_BASE}/summarize`, {
       method: "POST",
@@ -72,54 +67,61 @@ function inferPatientName(recordText) {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.error || "Request failed")
+      throw new Error(data?.error || "Failed to generate summary.")
     }
 
     // If server returns parsed JSON
     if (data.summary) {
       setSummary(data.summary)
-    } else if (data.summaryText) {
-      // fallback: if you ever return text
-      setSummary(null)
-      alert("Server returned text instead of JSON. Check console.")
-      console.log("summaryText:", data.summaryText)
-    } else {
-      throw new Error("Unexpected response shape")
+      return
+    } 
+      if (data.summaryText) {
+        throw new Error("The server returned text instead of the expected structured summary.")
+      }
+
+      throw new Error("Unexpected response received from the server.")
+    } catch (err) {
+      console.error(err)
+      setErrorMessage(err.message || "Something went wrong while generating the summary.")
+    } finally {
+      setIsLoading(false)
     }
-  } catch (err) {
-    console.error(err)
-    alert(err.message)
-  } finally {
-    setIsLoading(false)
   }
-}
 
   function handleClear() {
     setRecordText("")
     setSummary(null)
+    setSaveStatus(null)
+    setErrorMessage("")
   }
 
   async function handleSaveCase() {
   if (!summary) return
 
   try {
-    const res = await fetch(`${API_BASE}/api/cases`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        patientName: "Demo Patient",
-        species: "Feline",
-        summary,
-      }),
-    })
+    setSaveStatus(null)
+      setErrorMessage("")
+
+      const patientName = inferPatientName(recordText) || "Unknown Patient"
+      const species = inferSpeciesFromSignalment(summary.Signalment) || "Unknown"
+
+      const res = await fetch(`${API_BASE}/api/cases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientName,
+          species,
+          summary,
+        }),
+      })
 
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.error || "Failed to save case")
+      throw new Error(data?.error || "Failed to save case.")
     }
 
-    setSaveStatus(`Case saved successfully (ID: ${data.id})`)
+    setSaveStatus(`Case saved successfully${data.id ? ` (ID: ${data.id})` : ""}.`)
 
     setTimeout(() => {
       setSaveStatus(null)
@@ -132,7 +134,8 @@ function inferPatientName(recordText) {
 }
 
   function handleExportPdf() {
-    alert("R&D: Export PDF will be wired next.")
+    setErrorMessage("")
+    alert("Export PDF is the next feature to wire up.")
   }
 
   return (
@@ -148,9 +151,9 @@ function inferPatientName(recordText) {
               </p>
             </div>
 
-            <div className="hidden sm:flex items-center gap-2">
+            <div className="hidden items-center gap-2 sm:flex">
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
-                R&amp;D Demo
+                Proof of Concept
               </span>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
                 Desktop/Tablet
@@ -169,7 +172,7 @@ function inferPatientName(recordText) {
               <div>
                 <h2 className="text-lg font-semibold">Medical Record Input</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Paste unstructured patient history notes. Generate a structured clinical summary.
+                  Paste unstructured patient history notes to generate a structured clinical summary.
                 </p>
               </div>
 
@@ -203,21 +206,28 @@ function inferPatientName(recordText) {
               </button>
 
               <div className="text-xs text-white/50">
-                Tip: Paste at least a few lines of notes to enable generation.
+                Paste at least a few lines of notes to enable generation.
               </div>
             </div>
 
             {isLoading && (
               <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="text-sm font-medium text-white/80">Processing</div>
+                <div className="text-sm font-medium text-white/80">Generating summary</div>
                 <div className="mt-2 text-xs text-white/60">
-                  Simulating API call… (OpenAI + backend wiring is next)
+                  Organizing the record into structured clinical sections for review.
                 </div>
                 <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
                   <div className="h-full w-2/3 animate-pulse rounded-full bg-indigo-500/70" />
                 </div>
               </div>
             )}
+
+            {errorMessage && (
+              <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {errorMessage}
+              </div>
+            )}
+
           </section>
 
           {/* Output Panel */}
@@ -226,7 +236,7 @@ function inferPatientName(recordText) {
               <div>
                 <h2 className="text-lg font-semibold">Structured Summary</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Output organized by clinical sections (SOAP-ready structure).
+                  Output organized into clinical sections for faster review and documentation.
                 </p>
               </div>
 
@@ -251,12 +261,12 @@ function inferPatientName(recordText) {
             </div>
 
             {saveStatus && (
-  <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
-    {saveStatus}
-  </div>
-)}
+              <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300">
+                {saveStatus}
+              </div>
+            )}
 
-            {!summary && !isLoading && (
+            {!summary && !isLoading && !errorMessage && (
               <div className="mt-6 rounded-xl border border-dashed border-white/15 bg-neutral-950/40 p-6 text-sm text-white/60">
                 No summary yet. Paste a record and click <span className="text-white/80">Generate Summary</span>.
               </div>
@@ -274,7 +284,7 @@ function inferPatientName(recordText) {
 
         {/* Footer note */}
         <div className="mt-8 text-xs text-white/40">
-          R&amp;D demo goal: prove UI → backend → OpenAI → Firestore → PDF workflow is feasible (wired in stages).
+          Current proof of concept demonstrates the core summary generation and case-saving workflow.
         </div>
       </main>
     </div>
