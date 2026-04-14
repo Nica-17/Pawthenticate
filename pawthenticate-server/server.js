@@ -121,17 +121,34 @@ app.post("/summarize", async (req, res) => {
     }
 
     // -------------------------------
-    // Prompt content (kept simple)
+    // Prompt content
     // -------------------------------
-    // NOTE: We are using json_schema below, so we don't have to "hope"
-    // the model returns JSON—it's enforced.
     const prompt = `
-Convert the veterinary medical record below into a structured clinical summary.
+You are a veterinary clinical documentation assistant.
 
-Rules:
-- Use concise clinical phrasing.
+Convert the following unstructured veterinary medical record into a clean, professional, and clinically appropriate summary.
+
+Requirements:
+- Rewrite the content using formal veterinary medical language suitable for internal review or referral documentation.
+- Do NOT copy informal, conversational, or disorganized phrasing from the original notes.
+- Remove filler language, side comments, uncertainty chatter (e.g., "idk", "maybe", "lol"), and irrelevant details.
+- Preserve all clinically relevant information accurately.
+- If uncertainty is medically relevant, rewrite it in a professional manner.
+- Do NOT invent diagnostics, treatments, or findings that are not supported by the source text.
 - If a section is missing, return an empty string.
-- Do NOT invent diagnostics or treatments not supported by the text.
+
+Style Guidelines:
+- Use concise, professional clinical phrasing.
+- Write as if another veterinarian will read this summary.
+- Normalize messy phrasing into clear medical statements.
+- Avoid repetition and unnecessary wording.
+
+Tone & Output Expectations:
+- Write in a formal, objective, clinical tone.
+- Prefer medically appropriate terminology over casual wording.
+- Present information clearly and efficiently, similar to a SOAP or referral summary.
+- Avoid speculation unless explicitly supported by the text.
+- Do not include jokes, conversational tone, or administrative side comments unless clinically relevant.
 
 Medical record:
 """${recordText}"""

@@ -1,7 +1,26 @@
-import { useMemo, useState } from "react"
+/**
+ * Pawthenticate - Main Application Component
+ *
+ * This file controls:
+ * - User input of raw veterinary notes
+ * - AI summary generation (via backend API)
+ * - Display of structured clinical summaries
+ * - Saving and retrieving past cases
+ * - Previewing formatted clinical reports
+ *
+ * This is the core UI + state management layer of the app.
+ */
 
+import { useEffect, useMemo, useState } from "react"
+
+// ===============================
+// Configuration & Constants
+// ===============================
+
+// Base URL for backend API
 const API_BASE = "http://localhost:3001";
 
+// Defines the order of clinical sections int he UI and preview
 const SECTION_ORDER = [
   "Signalment",
   "Presenting Complaint",
@@ -12,6 +31,11 @@ const SECTION_ORDER = [
   "Plan",
 ]
 
+// ===============================
+// Reusable UI Components
+// ===============================
+
+// Displays a single clinical section (e.g., Signalment, History, etc.)
 function SectionCard({ title, body }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-4">
@@ -23,20 +47,52 @@ function SectionCard({ title, body }) {
   )
 }
 
+// ===============================
+// Main Application Component
+// ===============================
 export default function App() {
+
+  // ===============================
+  // State Management
+  // ===============================
+
+  // User input
   const [recordText, setRecordText] = useState("")
+
+  // Generation state
   const [isLoading, setIsLoading] = useState(false)
   const [summary, setSummary] = useState(null)
+
+  // UI feedback
   const [saveStatus, setSaveStatus] = useState(null)
   const [errorMessage, setErrorMessage] = useState("")
+
+  // Preview modal
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+
+  // Metadata
   const [generatedDate, setGeneratedDate] = useState("")
 
+  // Saved cases
+  const [savedCases, setSavedCases] = useState([])
+  const [isLoadingCases, setIsLoadingCases] = useState(false)
+  const [casesError, setCasesError] = useState("")
+
+  // ===============================
+  // Derived State / Computed Values
+  // ===============================
+
+  // Determines if user can generate a summary
   const canGenerate = useMemo(() => {
     return recordText.trim().length > 30 && !isLoading},
     [recordText, isLoading])
 
-  function inferSpeciesFromSignalment(signalment) {
+  // ===============================
+  // Helper Functions (Data Extraction)
+  // ===============================
+
+  // Infers species from AI-generated signalment text
+    function inferSpeciesFromSignalment(signalment) {
   if (!signalment) return "";
   const s = signalment.toLowerCase();
   if (s.includes("feline") || s.includes("cat")) return "Feline";
@@ -45,6 +101,7 @@ export default function App() {
   return "";
 }
 
+// Attemps to extract patient name from raw input text
 function inferPatientName(text) {
   // quick PoC heuristic: look for "Patient: NAME" or "Name: NAME"
   const match =
@@ -52,22 +109,52 @@ function inferPatientName(text) {
     text.match(/\bpt\s*:\s*["']?([^\n\r"']+)/i) ||
     text.match(/\bp\s*:\s*["']?([^\n\r"']+)/i) ||
     text.match(/\bname\s*:\s*([^\n\r]+)/i);
-  return match ? match[1].trim().slice(0, 60) : "";
+
+  if (!match) return ""
+
+  return match[1]
+    .split(/[-–—,(]| {2,}|\?/)[0]
+    .replace(/^["'\s]+|["'\s]+$/g, "")
+    .trim()
 }
 
+// Attemps to extract client/owner name from raw input text
 function inferClientName(text) {
   const match =
     text.match(/owner\s*:\s*([^\n\r]+)/i) ||
     text.match(/\bo\s*:\s*([^\n\r]+)/i) ||
     text.match(/client\s*:\s*([^\n\r]+)/i)
 
-  return match ? match[1].trim().slice(0, 60) : ""
+  if (!match) return ""
+
+  return match[1]
+    .split(/[-–—,(]| {2,}|\?/)[0]
+    .replace(/^["'\s]+|["'\s]+$/g, "")
+    .trim()
 }
+
+// ===============================
+// Derived Display Values
+// ===============================
 
   const patientName = inferPatientName(recordText) || "Unknown Patient"
   const clientName = inferClientName(recordText) || "Unknown Client"
   const species = inferSpeciesFromSignalment(summary?.Signalment) || "Unknown"
 
+  // ===============================
+  // Lifecycle Effects
+  // ===============================
+
+  // On initial load, fretch previously saved cases
+  useEffect(() => {
+    fetchSavedCases()
+  }, [])
+
+  // ===============================
+  // Core Actions (User Interactions)
+  // ===============================
+
+  // Sends raw notes to backend AI service to generate structured summary
   async function handleGenerate() {
   try {
     setIsLoading(true)
@@ -106,6 +193,7 @@ function inferClientName(text) {
     }
   }
 
+  // Resets entire form and UI state
   function handleClear() {
     setRecordText("")
     setSummary(null)
@@ -115,6 +203,7 @@ function inferClientName(text) {
     setGeneratedDate("")
   }
 
+  // Saves current case (summary + metadata) to backend database
   async function handleSaveCase() {
   if (!summary) return
 
@@ -129,6 +218,8 @@ function inferClientName(text) {
           patientName,
           clientName,
           species,
+          generatedDate,
+          originalRecordText: recordText,
           summary,
         }),
       })
@@ -140,6 +231,7 @@ function inferClientName(text) {
     }
 
     setSaveStatus(`Case saved successfully${data.id ? ` (ID: ${data.id})` : ""}.`)
+    fetchSavedCases()
 
     setTimeout(() => {
       setSaveStatus(null)
@@ -151,10 +243,81 @@ function inferClientName(text) {
   }
 }
 
-  function handleExportPdf() {
+// Retrieves saved cases from backend
+async function fetchSavedCases() {
+  try {
+    setIsLoadingCases(true)
+    setCasesError("")
+
+    const res = await fetch(`${API_BASE}/api/cases`)
+    const data = await res.json()
+
+    console.log("Saved cases response:", data)
+
+    if (!res.ok) {
+      throw new Error(data?.error || "Failed to load saved cases.")
+    }
+
+    const cases = Array.isArray(data)
+      ? data
+      : Array.isArray(data.cases)
+        ? data.cases
+        : Array.isArray(data.data)
+          ? data.data
+          : []
+
+    setSavedCases(cases)
+  } catch (err) {
+    console.error(err)
+    setCasesError(err.message || "Failed to load saved cases.")
+  } finally {
+    setIsLoadingCases(false)
+  }
+}
+
+// Normalizes various date formats from backend into readable string
+function formatCaseDate(savedCase) {
+  const rawDate =
+    savedCase.generatedDate ||
+    savedCase.timestamp ||
+    savedCase.createdAt ||
+    savedCase.created_at ||
+    ""
+
+  if (!rawDate) return "Saved case"
+
+  if (typeof rawDate === "string") return rawDate
+
+  if (rawDate?.seconds) {
+    return new Date(rawDate.seconds * 1000).toLocaleString()
+  }
+
+  if (rawDate instanceof Date) {
+    return rawDate.toLocaleString()
+  }
+
+  return "Saved case"
+}
+
+// Loads a previously saved case into the UI for review  
+function handleLoadSavedCase(savedCase) {
+  setSummary(savedCase.summary || null)
+  setRecordText(savedCase.originalRecordText || savedCase.recordText || "")
+  setGeneratedDate(formatCaseDate(savedCase))
+  setSaveStatus(null)
+  setErrorMessage("")
+  setIsPreviewOpen(false)
+}
+
+// Placeholder for future PDF export functionality  
+function handleExportPdf() {
     setErrorMessage("")
     alert("Export PDF is the next feature to wire up.")
   }
+
+  // ===============================
+  // Render UI
+  // ===============================
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white">
@@ -183,8 +346,11 @@ function inferClientName(text) {
 
       {/* Main */}
       <main className="mx-auto max-w-6xl px-6 py-8">
+        
+        {/* Main Layout - Input (left) and Output (right) panels */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Input Panel */}
+          
+          {/* Input Panel - User pastes raw veterinary notes to generate summary */}
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -248,7 +414,7 @@ function inferClientName(text) {
 
           </section>
 
-          {/* Output Panel */}
+          {/* Output Panel - Displays AI-generated structured clinical summary */}
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -308,11 +474,82 @@ function inferClientName(text) {
           </section>
         </div>
 
+        {/* Saved Cases - List of previously saved summaries from database */}
+        <section className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold">Saved Cases</h2>
+              <p className="mt-1 text-sm text-white/60">
+                Review previously saved case summaries from the database.
+              </p>
+            </div>
+
+            <button
+              onClick={fetchSavedCases}
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10"
+              type="button"
+            >
+              Refresh Cases
+            </button>
+          </div>
+
+          {isLoadingCases && (
+            <div className="mt-4 text-sm text-white/60">
+              Loading saved cases...
+            </div>
+          )}
+
+          {casesError && (
+            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {casesError}
+            </div>
+          )}
+
+          {!isLoadingCases && !casesError && savedCases.length === 0 && (
+            <div className="mt-4 rounded-xl border border-dashed border-white/15 bg-neutral-950/40 p-6 text-sm text-white/60">
+              No saved cases found yet.
+            </div>
+          )}
+
+          {savedCases.length > 0 && (
+            <div className="mt-5 grid gap-3">
+              {savedCases.map((savedCase, index) => (
+                <button
+                  key={savedCase.id || index}
+                  onClick={() => handleLoadSavedCase(savedCase)}
+                  className="rounded-xl border border-white/10 bg-neutral-950/50 p-4 text-left transition hover:bg-white/10"
+                  type="button"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-white/90">
+                        {savedCase.patientName || "Unknown Patient"}
+                      </div>
+                      <div className="mt-1 text-xs text-white/60">
+                        {savedCase.clientName || "Unknown Client"} • {savedCase.species || "Unknown Species"}
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-white/50">
+                      {formatCaseDate(savedCase)}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-xs text-white/50">
+                    Click to load this saved summary into the review panel.
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* Footer note */}
         <div className="mt-8 text-xs text-white/40">
           Current proof of concept demonstrates the core summary generation and case-saving workflow.
         </div>
 
+        {/* Preview Modal - Displays formatted clinical report for review/export */}
         {isPreviewOpen && summary && (
   <div
     className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
