@@ -66,7 +66,14 @@ app.get("/api/health", (req, res) => {
 // Save case
 app.post("/api/cases", async (req, res) => {
   try {
-    const { patientName, species, summary } = req.body;
+    const {
+      patientName,
+      clientName,
+      species,
+      generatedDate,
+      originalRecordText,
+      summary,
+    } = req.body;
 
     if (!patientName || !summary) {
       return res.status(400).json({
@@ -74,14 +81,22 @@ app.post("/api/cases", async (req, res) => {
       });
     }
 
-    const docRef = await db.collection("cases").add({
+    const caseData = {
       patientName,
+      clientName: clientName || null,
       species: species || null,
+      generatedDate: generatedDate || null,
+      originalRecordText: originalRecordText || null,
       summary,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    };
 
-    res.status(201).json({ id: docRef.id });
+    const docRef = await db.collection("cases").add(caseData);
+
+    res.status(201).json({
+      id: docRef.id,
+      ...caseData,
+    });
   } catch (error) {
     console.error("Error saving case:", error);
     res.status(500).json({ error: "Failed to save case" });

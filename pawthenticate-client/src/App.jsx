@@ -36,11 +36,13 @@ const SECTION_ORDER = [
 // ===============================
 
 // Displays a single clinical section (e.g., Signalment, History, etc.)
-function SectionCard({ title, body }) {
+function SummarySection({ title, body, isLast = false }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-      <div className="text-sm font-semibold text-white/90">{title}</div>
-      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-white/70">
+    <div className={`${!isLast ? "border-b border-white/10 pb-4" : ""}`}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
+        {title}
+      </div>
+      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-white/85">
         {body || "—"}
       </div>
     </div>
@@ -78,6 +80,10 @@ export default function App() {
   const [isLoadingCases, setIsLoadingCases] = useState(false)
   const [casesError, setCasesError] = useState("")
 
+  const [searchTerm, setSearchTerm] = useState("")
+  const [sortOption, setSortOption] = useState("newest")
+  const [currentPage, setCurrentPage] = useState(1)
+
   // ===============================
   // Derived State / Computed Values
   // ===============================
@@ -93,44 +99,81 @@ export default function App() {
 
   // Infers species from AI-generated signalment text
     function inferSpeciesFromSignalment(signalment) {
-  if (!signalment) return "";
-  const s = signalment.toLowerCase();
-  if (s.includes("feline") || s.includes("cat")) return "Feline";
-  if (s.includes("canine") || s.includes("dog")) return "Canine";
-  if (s.includes("equine") || s.includes("horse")) return "Equine";
-  return "";
+  if (!signalment) return "Unknown"
+
+  const s = signalment.toLowerCase()
+
+  const canineTerms = [
+    "canine", "dog", "golden retriever", "labrador", "lab", "german shepherd",
+    "bulldog", "poodle", "terrier", "beagle", "boxer", "dachshund", "husky",
+    "rottweiler", "chihuahua", "corgi", "shih tzu", "mastiff", "doberman"
+  ]
+
+  const felineTerms = [
+    "feline", "cat", "dsh", "dlh", "dmh", "domestic shorthair",
+    "domestic longhair", "domestic medium hair", "siamese", "maine coon",
+    "persian", "ragdoll", "bengal", "sphynx"
+  ]
+
+  const equineTerms = [
+    "equine", "horse", "pony", "mare", "stallion", "gelding"
+  ]
+
+  if (canineTerms.some((term) => s.includes(term))) return "Canine"
+  if (felineTerms.some((term) => s.includes(term))) return "Feline"
+  if (equineTerms.some((term) => s.includes(term))) return "Equine"
+
+  return "Unknown"
 }
 
-// Attemps to extract patient name from raw input text
-function inferPatientName(text) {
-  // quick PoC heuristic: look for "Patient: NAME" or "Name: NAME"
-  const match =
-    text.match(/patient\s*:\s*([^\n\r]+)/i) ||
-    text.match(/\bpt\s*:\s*["']?([^\n\r"']+)/i) ||
-    text.match(/\bp\s*:\s*["']?([^\n\r"']+)/i) ||
-    text.match(/\bname\s*:\s*([^\n\r]+)/i);
+// Generic helper for extracting a labeled field from messy raw text
+// Supports formats like:
+// - Client: Sarah K
+// - CLIENT = J. Martinez
+// - Owner - Jane Doe
+function extractLabeledField(sourceText, labels) {
+  if (!sourceText) return ""
+
+  const pattern = new RegExp(
+    `\\b(?:${labels.join("|")})\\s*[:=\\-]\\s*([^\\n\\r,;]+)`,
+    "i"
+  )
+
+  const match = sourceText.match(pattern)
 
   if (!match) return ""
 
   return match[1]
+    .replace(/^["'\s]+|["'\s]+$/g, "")
+    .trim()
+}
+
+// Attemps to extract patient name from raw input text
+function inferPatientName(text) {
+  if (!text) return ""
+
+  // First try direct labeled patterns such as:
+  // Patient: Luna
+  // Name = Bella
+  // Pt - Rocky
+  const directMatch =
+    extractLabeledField(text, ["patient", "name", "pt"]) ||
+    extractLabeledField(text, ["p"])
+
+  if (!directMatch) return ""
+
+  // Trim off extra trailing details if the line contains more than just the name
+  return directMatch
     .split(/[-–—,(]| {2,}|\?/)[0]
     .replace(/^["'\s]+|["'\s]+$/g, "")
     .trim()
 }
 
 // Attemps to extract client/owner name from raw input text
-function inferClientName(text) {
-  const match =
-    text.match(/owner\s*:\s*([^\n\r]+)/i) ||
-    text.match(/\bo\s*:\s*([^\n\r]+)/i) ||
-    text.match(/client\s*:\s*([^\n\r]+)/i)
+function inferClientName(sourceText) {
+  if (!sourceText) return ""
 
-  if (!match) return ""
-
-  return match[1]
-    .split(/[-–—,(]| {2,}|\?/)[0]
-    .replace(/^["'\s]+|["'\s]+$/g, "")
-    .trim()
+  return extractLabeledField(sourceText, ["client", "owner"])
 }
 
 // ===============================
@@ -141,6 +184,51 @@ function inferClientName(text) {
   const clientName = inferClientName(recordText) || "Unknown Client"
   const species = inferSpeciesFromSignalment(summary?.Signalment) || "Unknown"
 
+  const filteredAndSortedCases = [...savedCases]
+    .filter((savedCase) => {
+      const patient = getSavedCasePatientName(savedCase).toLowerCase()
+      const client = getSavedCaseClientName(savedCase).toLowerCase()
+      const speciesValue = getSavedCaseSpecies(savedCase).toLowerCase()
+      const query = searchTerm.toLowerCase().trim()
+
+      if (!query) return true
+
+      return (
+        patient.includes(query) ||
+        client.includes(query) ||
+        speciesValue.includes(query)
+      )
+    })
+    .sort((a, b) => {
+      if (sortOption === "name") {
+        return getSavedCasePatientName(a).localeCompare(getSavedCasePatientName(b))
+      }
+
+      // Sort saved cases using raw backend dates so sorting stays accurate
+const dateA =
+  normalizeCaseDate(
+    a.generatedDate || a.timestamp || a.createdAt || a.created_at
+  )?.getTime() || 0
+
+const dateB =
+  normalizeCaseDate(
+    b.generatedDate || b.timestamp || b.createdAt || b.created_at
+  )?.getTime() || 0
+
+      if (sortOption === "oldest") {
+        return dateA - dateB
+      }
+
+      return dateB - dateA
+    })
+
+  const casesPerPage = 8
+  const totalPages = Math.max(1, Math.ceil(filteredAndSortedCases.length / casesPerPage))
+  const paginatedCases = filteredAndSortedCases.slice(
+    (currentPage - 1) * casesPerPage,
+    currentPage * casesPerPage
+  )
+
   // ===============================
   // Lifecycle Effects
   // ===============================
@@ -149,6 +237,10 @@ function inferClientName(text) {
   useEffect(() => {
     fetchSavedCases()
   }, [])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, sortOption])
 
   // ===============================
   // Core Actions (User Interactions)
@@ -210,6 +302,8 @@ function inferClientName(text) {
   try {
     setSaveStatus(null)
       setErrorMessage("")
+
+      console.log("Saving clientName:", clientName)
 
       const res = await fetch(`${API_BASE}/api/cases`, {
         method: "POST",
@@ -275,45 +369,267 @@ async function fetchSavedCases() {
   }
 }
 
-// Normalizes various date formats from backend into readable string
-function formatCaseDate(savedCase) {
+// Internal helper: normalize any backend date into a JS Date object
+// Handles Firestore timestamps, strings, and Date objects
+
+function normalizeCaseDate(value) {
+  if (!value) return null
+
+  if (value?.seconds) {
+    return new Date(value.seconds * 1000) // Firestore timestamp
+  }
+
+  if (typeof value === "string") {
+    return new Date(value)
+  }
+
+  if (value instanceof Date) {
+    return value
+  }
+
+  return null
+}
+
+
+// Formats dates for the Saved Cases table only
+// Keeps the display compact and easy to scan
+function formatCaseListDate(savedCase) {
   const rawDate =
     savedCase.generatedDate ||
     savedCase.timestamp ||
     savedCase.createdAt ||
     savedCase.created_at ||
-    ""
+    null
 
-  if (!rawDate) return "Saved case"
+  const date = normalizeCaseDate(rawDate)
 
-  if (typeof rawDate === "string") return rawDate
-
-  if (rawDate?.seconds) {
-    return new Date(rawDate.seconds * 1000).toLocaleString()
+  if (!date || Number.isNaN(date.getTime())) {
+    return "Saved case"
   }
 
-  if (rawDate instanceof Date) {
-    return rawDate.toLocaleString()
-  }
-
-  return "Saved case"
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
 }
 
-// Loads a previously saved case into the UI for review  
+// Formats a full timestamp for preview documents and PDF export
+// This keeps report output more professional and clinically useful
+function formatDocumentDateTime(value) {
+  const date = normalizeCaseDate(value)
+
+  if (!date || Number.isNaN(date.getTime())) {
+    return "Not available"
+  }
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+function getSavedCasePatientName(savedCase) {
+    if (savedCase.patientName && savedCase.patientName !== "Unknown Patient") {
+      return savedCase.patientName
+    }
+
+    const signalment = savedCase.summary?.Signalment || ""
+
+    const match =
+      signalment.match(/^([A-Z][a-zA-Z' -]{1,40})\s*[-–—,]/) ||
+      signalment.match(/\bname\s*:\s*([A-Za-z0-9' -]{1,40})/i)
+
+    return match ? match[1].trim() : "Unknown Patient"
+  }
+
+  function getSavedCaseSpecies(savedCase) {
+    if (savedCase.species && savedCase.species !== "Unknown") {
+      return savedCase.species
+    }
+
+    return inferSpeciesFromSignalment(savedCase.summary?.Signalment) || "Unknown"
+  }
+
+  function getSavedCaseClientName(savedCase) {
+    if (savedCase?.clientName) {
+      return savedCase.clientName.trim()
+    }
+
+    const sourceText =
+      savedCase.originalRecordText ||
+      savedCase.recordText ||
+      ""
+
+    return inferClientName(sourceText) || "Unknown Client"
+  }
+
+// Loads a saved case back into the workspace and restores its document metadata
 function handleLoadSavedCase(savedCase) {
   setSummary(savedCase.summary || null)
   setRecordText(savedCase.originalRecordText || savedCase.recordText || "")
-  setGeneratedDate(formatCaseDate(savedCase))
+  // When loading a saved case, preserve a document-style date/time for preview and export
+  setGeneratedDate(
+    formatDocumentDateTime(
+      savedCase.generatedDate ||
+      savedCase.timestamp ||
+      savedCase.createdAt ||
+      savedCase.created_at
+    )
+  )
+
   setSaveStatus(null)
   setErrorMessage("")
   setIsPreviewOpen(false)
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth",
+  })
 }
 
-// Placeholder for future PDF export functionality  
+// Export PDF functionality  
 function handleExportPdf() {
-    setErrorMessage("")
-    alert("Export PDF is the next feature to wire up.")
+    if (!summary) return
+
+  setErrorMessage("")
+
+  const printableSections = SECTION_ORDER.map((section) => {
+    const body = summary[section] || "—"
+
+    return `
+      <section>
+      <h3>${section}</h3>
+      <p>${body}</p>
+    </section>
+    `
+  }).join("")
+
+  const printWindow = window.open("", "_blank", "width=900,height=700")
+
+  if (!printWindow) {
+    setErrorMessage("Unable to open export window. Please allow pop-ups and try again.")
+    return
   }
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Pawthenticate Clinical Summary Report</title>
+        <style>
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    background: #ffffff;
+    color: #111827;
+    margin: 0;
+    padding: 32px;
+  }
+
+  .report {
+    max-width: 750px;
+    margin: 0 auto;
+  }
+
+  .header {
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+  }
+
+  .title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .subtitle {
+    font-size: 12px;
+    color: #6b7280;
+    margin: 4px 0 0 0;
+  }
+
+  .meta {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .meta div {
+    margin-bottom: 2px;
+  }
+
+  .meta strong {
+    color: #111827;
+  }
+
+  section {
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+  }
+
+  h3 {
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    margin: 0 0 6px 0;
+    color: #111827;
+    letter-spacing: 0.04em;
+  }
+
+  p {
+    margin: 0 0 2px 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #111827;
+    white-space: pre-wrap;
+  }
+
+  @media print {
+    body {
+      padding: 20px;
+    }
+
+    section {
+      page-break-inside: avoid;
+    }
+  }
+</style>
+      </head>
+      <body>
+        <div class="report">
+          <div class="header">
+            <h1 class="title">Clinical Summary Report</h1>
+            <p class="subtitle">Generated by Pawthenticate</p>
+
+            <div class="meta">
+              <div><strong>Patient:</strong> ${patientName}</div>
+              <div><strong>Client:</strong> ${clientName}</div>
+              <div><strong>Species:</strong> ${species}</div>
+              <div><strong>Generated:</strong> ${formatDocumentDateTime(generatedDate)}</div>
+            </div>
+          </div>
+
+          ${printableSections}
+
+        </div>
+
+        <script>
+          window.onload = function () {
+            window.print();
+          };
+        </script>
+      </body>
+    </html>
+  `)
+
+  printWindow.document.close()
+}
 
   // ===============================
   // Render UI
@@ -465,10 +781,17 @@ function handleExportPdf() {
             )}
 
             {summary && (
-              <div className="mt-5 grid gap-3">
-                {SECTION_ORDER.map((section) => (
-                  <SectionCard key={section} title={section} body={summary[section]} />
-                ))}
+              <div className="mt-5 rounded-2xl border border-white/10 bg-neutral-950/40 p-5 max-h-[520px] overflow-y-auto">
+                <div className="space-y-4">
+                  {SECTION_ORDER.map((section, index) => (
+                    <SummarySection
+                      key={section}
+                      title={section}
+                      body={summary[section]}
+                      isLast={index === SECTION_ORDER.length - 1}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -511,37 +834,114 @@ function handleExportPdf() {
             </div>
           )}
 
-          {savedCases.length > 0 && (
-            <div className="mt-5 grid gap-3">
-              {savedCases.map((savedCase, index) => (
-                <button
-                  key={savedCase.id || index}
-                  onClick={() => handleLoadSavedCase(savedCase)}
-                  className="rounded-xl border border-white/10 bg-neutral-950/50 p-4 text-left transition hover:bg-white/10"
-                  type="button"
+          <div className="mt-5 flex flex-col gap-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by patient, client, or species..."
+                className="w-full rounded-xl border border-white/10 bg-neutral-950/60 px-4 py-2 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/60 md:max-w-md"
+              />
+
+              <div className="relative">
+                <select
+                  value={sortOption}
+                  onChange={(e) => setSortOption(e.target.value)}
+                  className="rounded-xl border border-white/10 bg-neutral-950/60 pl-4 pr-10 py-2 text-sm text-white/90 appearance-none focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-white/90">
-                        {savedCase.patientName || "Unknown Patient"}
-                      </div>
-                      <div className="mt-1 text-xs text-white/60">
-                        {savedCase.clientName || "Unknown Client"} • {savedCase.species || "Unknown Species"}
-                      </div>
-                    </div>
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="name">Patient Name</option>
+                </select>
 
-                    <div className="text-xs text-white/50">
-                      {formatCaseDate(savedCase)}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 text-xs text-white/50">
-                    Click to load this saved summary into the review panel.
-                  </div>
-                </button>
-              ))}
+                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-white/40">
+                  ▼
+                </div>
+              </div>
             </div>
-          )}
+
+            {!isLoadingCases && !casesError && savedCases.length > 0 && filteredAndSortedCases.length === 0 && (
+              <div className="rounded-xl border border-dashed border-white/15 bg-neutral-950/40 p-6 text-sm text-white/60">
+                No saved cases match your search.
+              </div>
+            )}
+          </div>
+
+            {filteredAndSortedCases.length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-white/10">
+                <div className="grid grid-cols-[2fr_2fr_1fr_1.5fr_auto] gap-4 border-b border-white/10 bg-white/5 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-white/50">
+                  <div>Patient</div>
+                  <div>Client</div>
+                  <div>Species</div>
+                  <div>Date</div>
+                  <div>Action</div>
+                </div>
+
+                <div className="max-h-[420px] overflow-y-auto">
+                  {paginatedCases.map((savedCase, index) => (
+                    <div
+                      key={savedCase.id || index}
+                      className="grid grid-cols-[2fr_2fr_1fr_1.5fr_auto] gap-4 border-b border-white/10 bg-neutral-950/40 px-4 py-3 text-sm text-white/85 last:border-b-0"
+                    >
+                      <div className="font-medium text-white/90">
+                        {getSavedCasePatientName(savedCase)}
+                      </div>
+
+                      <div className="text-white/70">
+                        {getSavedCaseClientName(savedCase)}
+                      </div>
+
+                      <div className="text-white/70">
+                        {getSavedCaseSpecies(savedCase)}
+                      </div>
+
+                      <div className="text-white/60">
+                        {formatCaseListDate(savedCase)}
+                      </div>
+
+                      <div>
+                        <button
+                          onClick={() => handleLoadSavedCase(savedCase)}
+                          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/80 hover:bg-white/10"
+                          type="button"
+                        >
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {filteredAndSortedCases.length > 0 && (
+              <div className="flex items-center justify-between text-sm text-white/60">
+                <div>
+                  Page {currentPage} of {totalPages}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                  >
+                    Previous
+                  </button>
+
+                  <button
+                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
         </section>
 
         {/* Footer note */}
@@ -583,7 +983,7 @@ function handleExportPdf() {
       <span className="font-semibold">Species:</span> {species}
     </div>
     <div>
-      <span className="font-semibold">Generated:</span> {generatedDate || "Not generated yet"}
+      <span className="font-semibold">Generated:</span> {formatDocumentDateTime(generatedDate)}
     </div>
   </div>
 </div>
