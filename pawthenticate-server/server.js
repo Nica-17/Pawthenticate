@@ -126,7 +126,7 @@ app.get("/api/cases", async (req, res) => {
 
 app.post("/summarize", async (req, res) => {
   try {
-    const { recordText } = req.body
+    const { recordText, organizationPreference } = req.body
 
     // Basic validation
     if (!recordText || recordText.trim().length < 20) {
@@ -138,6 +138,14 @@ app.post("/summarize", async (req, res) => {
     // -------------------------------
     // Prompt content
     // -------------------------------
+
+    // Adjusts how the model organizes multi-visit or multi-document records
+    // based on the user's selected chronology preference
+    const organizationInstruction =
+      organizationPreference === "newest"
+        ? "When the source material contains multiple visits, events, or documents, organize the summary so the timeline is understood from the most recent information back to the earliest."
+        : "When the source material contains multiple visits, events, or documents, organize the summary so the timeline is understood from the earliest information through to the most recent."
+        
     const prompt = `
 You are a veterinary clinical documentation assistant.
 
@@ -157,6 +165,15 @@ Style Guidelines:
 - Write as if another veterinarian will read this summary.
 - Normalize messy phrasing into clear medical statements.
 - Avoid repetition and unnecessary wording.
+
+Organization Instructions:
+- ${organizationInstruction}
+- If the input appears to include multiple records or uploaded documents, synthesize them into one coherent summary.
+- Preserve the clinical timeline as clearly as possible when summarizing the case history.
+- If the record contains multiple visits or entries, separate them into distinct visit summaries.
+- Do NOT combine all visits into one summary.
+- Maintain chronological order based on the provided organization preference.
+- Provide a brief overall case overview summarizing the full case progression.
 
 Tone & Output Expectations:
 - Write in a formal, objective, clinical tone.
@@ -194,22 +211,38 @@ Medical record:
             additionalProperties: false,
             properties: {
               Signalment: { type: "string" },
-              "Presenting Complaint": { type: "string" },
-              History: { type: "string" },
-              Diagnostics: { type: "string" },
-              Treatments: { type: "string" },
-              Assessment: { type: "string" },
-              Plan: { type: "string" },
+              CaseOverview: { type: "string" },
+              Visits: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    VisitLabel: { type: "string" },
+                    VisitDate: { type: "string" },
+                    Source: { type: "string" },
+                    "Presenting Complaint": { type: "string" },
+                    History: { type: "string" },
+                    Diagnostics: { type: "string" },
+                    Treatments: { type: "string" },
+                    Assessment: { type: "string" },
+                    Plan: { type: "string" },
+                  },
+                  required: [
+                    "VisitLabel",
+                    "VisitDate",
+                    "Source",
+                    "Presenting Complaint",
+                    "History",
+                    "Diagnostics",
+                    "Treatments",
+                    "Assessment",
+                    "Plan",
+                  ],
+                },
+              },
             },
-            required: [
-              "Signalment",
-              "Presenting Complaint",
-              "History",
-              "Diagnostics",
-              "Treatments",
-              "Assessment",
-              "Plan",
-            ],
+            required: ["Signalment", "CaseOverview", "Visits"],
           },
         },
       },
