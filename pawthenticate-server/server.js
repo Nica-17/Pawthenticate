@@ -1,69 +1,113 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import OpenAI from "openai";
-import admin from "firebase-admin";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+/**
+ * Pawthenticate - Backend API Server
+ *
+ * Responsibilities:
+ * - Configure the Express server and middleware
+ * - Initialize Firebase Admin for Firestore access
+ * - Save and retrieve veterinary case summaries
+ * - Send raw medical records to OpenAI for structured summarization
+ *
+ * This file currently acts as the main backend controller for the proof of concept.
+ */
 
-dotenv.config();
+import express from "express"
+import cors from "cors"
+import dotenv from "dotenv"
+import OpenAI from "openai"
+import admin from "firebase-admin"
+import fs from "fs"
+import path from "path"
+import { fileURLToPath } from "url"
 
+// Load environment variables from .env
+dotenv.config()
+
+// ==============================
+// Process Error Handling
+// ==============================
+
+// Log unhandled promise rejections so backend failures are easier to diagnose
 process.on("unhandledRejection", (reason) => {
-  console.error("UNHANDLED REJECTION:", reason);
-});
+  console.error("UNHANDLED REJECTION:", reason)
+})
 
+// Log uncaught exceptions so unexpected crashes are visible in the terminal
 process.on("uncaughtException", (err) => {
-  console.error("UNCAUGHT EXCEPTION:", err);
-});
+  console.error("UNCAUGHT EXCEPTION:", err)
+})
 
-const app = express();
+// ==============================
+// App Configuration
+// ==============================
 
+const app = express()
+const PORT = process.env.PORT || 3001
+
+// ==============================
 // Middleware
-app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+// ==============================
 
-// OpenAI client
+// Enable cross-origin requests from the frontend
+app.use(cors())
+
+// Accept JSON request bodies up to 2 MB
+app.use(express.json({ limit: "2mb" }))
+
+// ==============================
+// OpenAI Configuration
+// ==============================
+
+// Warn during startup if the OpenAI key is missing
 if (!process.env.OPENAI_API_KEY) {
   console.warn(
-    '⚠️ OPENAI_API_KEY is missing. Add it to pawthenticate-server/.env (OPENAI_API_KEY=...)'
-  );
+    "⚠️ OPENAI_API_KEY is missing. Add it to pawthenticate-server/.env (OPENAI_API_KEY=...)"
+  )
 }
 
+// Initialize the OpenAI client for summary generation
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
+})
 
-// -------------------------
-// Firebase Admin Init
-// -------------------------
+// ==============================
+// Firebase Configuration
+// ==============================
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Resolve the current file path so the Firebase service account path works correctly
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
+// Build the full path to the Firebase service account file from the environment variable
 const serviceAccountPath = path.join(
   __dirname,
   process.env.FIREBASE_SERVICE_ACCOUNT
-);
+)
 
-const serviceAccount = JSON.parse(
-  fs.readFileSync(serviceAccountPath, "utf-8")
-);
+// Read and parse the Firebase service account credentials
+const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"))
 
+// Initialize Firebase Admin so the backend can read and write Firestore documents
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-});
+})
 
-const db = admin.firestore();
+// Firestore database instance used throughout the API routes
+const db = admin.firestore()
 
-// -------------------------------
-// Routes
-// -------------------------------
+// ==============================
+// Health Route
+// ==============================
+
+// Basic health-check endpoint to confirm the API is running
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true });
-});
+  res.json({ ok: true })
+})
 
-// Save case
+// ==============================
+// Case Routes
+// ==============================
+
+// Saves a generated case summary and its supporting metadata to Firestore
 app.post("/api/cases", async (req, res) => {
   try {
     const {
@@ -73,12 +117,13 @@ app.post("/api/cases", async (req, res) => {
       generatedDate,
       originalRecordText,
       summary,
-    } = req.body;
+    } = req.body
 
+    // Require the minimum fields needed to store a meaningful case
     if (!patientName || !summary) {
       return res.status(400).json({
         error: "patientName and summary are required",
-      });
+      })
     }
 
     const caseData = {
@@ -89,63 +134,64 @@ app.post("/api/cases", async (req, res) => {
       originalRecordText: originalRecordText || null,
       summary,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
+    }
 
-    const docRef = await db.collection("cases").add(caseData);
+    const docRef = await db.collection("cases").add(caseData)
 
     res.status(201).json({
       id: docRef.id,
       ...caseData,
-    });
+    })
   } catch (error) {
-    console.error("Error saving case:", error);
-    res.status(500).json({ error: "Failed to save case" });
+    console.error("Error saving case:", error)
+    res.status(500).json({ error: "Failed to save case" })
   }
-});
+})
 
-// List cases
+// Returns the most recent saved cases for the frontend dashboard
 app.get("/api/cases", async (req, res) => {
   try {
     const snapshot = await db
       .collection("cases")
       .orderBy("createdAt", "desc")
       .limit(25)
-      .get();
+      .get()
 
     const cases = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
-    }));
+    }))
 
-    res.json({ cases });
+    res.json({ cases })
   } catch (error) {
-    console.error("Error fetching cases:", error);
-    res.status(500).json({ error: "Failed to fetch cases" });
+    console.error("Error fetching cases:", error)
+    res.status(500).json({ error: "Failed to fetch cases" })
   }
-});
+})
 
+// ==============================
+// Summarization Route
+// ==============================
+
+// Generates a structured veterinary summary from raw source text
 app.post("/summarize", async (req, res) => {
   try {
     const { recordText, organizationPreference } = req.body
 
-    // Basic validation
+    // Require enough source text to build a meaningful summary
     if (!recordText || recordText.trim().length < 20) {
       return res.status(400).json({
         error: "recordText is required (minimum ~20 characters).",
       })
     }
 
-    // -------------------------------
-    // Prompt content
-    // -------------------------------
-
-    // Adjusts how the model organizes multi-visit or multi-document records
-    // based on the user's selected chronology preference
+    // Adjust how the model should organize multi-visit or multi-document records
     const organizationInstruction =
       organizationPreference === "newest"
         ? "When the source material contains multiple visits, events, or documents, organize the summary so the timeline is understood from the most recent information back to the earliest."
         : "When the source material contains multiple visits, events, or documents, organize the summary so the timeline is understood from the earliest information through to the most recent."
-        
+
+    // Build the clinical summarization prompt sent to the model
     const prompt = `
 You are a veterinary clinical documentation assistant.
 
@@ -186,12 +232,7 @@ Medical record:
 """${recordText}"""
 `
 
-    // -------------------------------
-    // OpenAI call (Responses API)
-    // -------------------------------
-    // IMPORTANT:
-    // - input must be an array of messages when you're using roles
-    // - json_schema forces valid JSON output with a defined structure
+    // Request a structured JSON response from OpenAI using a strict schema
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: [
@@ -248,11 +289,7 @@ Medical record:
       },
     })
 
-    // -------------------------------
-    // Parse the forced JSON output
-    // -------------------------------
-    // With json_schema, output_text should be valid JSON.
-    // We parse it and ALWAYS return: { summary: parsedObject }
+    // Parse the model response, which should already match the required schema
     const raw = (response.output_text || "").trim()
 
     let parsed
@@ -266,17 +303,11 @@ Medical record:
       })
     }
 
-    // -------------------------------
-    // Consistent response shape
-    // -------------------------------
+    // Return the structured summary using the response shape expected by the frontend
     return res.json({ summary: parsed })
   } catch (error) {
-    // -------------------------------
-    // Helpful error logging
-    // -------------------------------
     console.error("❌ /summarize failed:", error?.message || error)
 
-    // If OpenAI SDK provides response details, surface a bit (without leaking secrets)
     return res.status(500).json({
       error: "OpenAI request failed.",
       detail: error?.message || String(error),
@@ -284,10 +315,11 @@ Medical record:
   }
 })
 
-// -------------------------------
-// Start server
-// -------------------------------
-const PORT = process.env.PORT || 3001
+// ==============================
+// Start Server
+// ==============================
+
+// Start the API server and log the local address
 app.listen(PORT, () => {
   console.log(`✅ API running at http://localhost:${PORT}`)
 })
