@@ -36,20 +36,61 @@ const VISIT_SECTION_ORDER = [
   "Plan",
 ]
 
+// Maps each generation stage to a user-facing label and progress value
+const GENERATION_STAGE_CONFIG = {
+  preparing: {
+    label: "Preparing referral record for processing...",
+    progress: 15,
+  },
+  sending: {
+    label: "Submitting record for clinical summarization...",
+    progress: 45,
+  },
+  structuring: {
+    label: "Organizing findings into structured clinical sections...",
+    progress: 80,
+  },
+  finalizing: {
+    label: "Finalizing report output for review...",
+    progress: 100,
+  },
+}
+
 // ==============================
 // Reusable Display Components
 // ==============================
 
 // Shared summary block used across the generated summary and visit sections
-function SummarySection({ title, body, isLast = false }) {
+function SummarySection({
+  title,
+  body,
+  onChange,
+  isLast = false,
+  multiline = true,
+}) {
   return (
     <div className={`${!isLast ? "border-b border-white/10 pb-4" : ""}`}>
       <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
         {title}
       </div>
-      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-white/85">
-        {body || "—"}
-      </div>
+
+      {multiline ? (
+        <textarea
+          value={body || ""}
+          onChange={(e) => onChange(e.target.value)}
+          rows={4}
+          className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm leading-relaxed text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+          placeholder={`Enter ${title.toLowerCase()}...`}
+        />
+      ) : (
+        <input
+          type="text"
+          value={body || ""}
+          onChange={(e) => onChange(e.target.value)}
+          className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+          placeholder={`Enter ${title.toLowerCase()}...`}
+        />
+      )}
     </div>
   )
 }
@@ -69,6 +110,8 @@ export default function App() {
   // Generation state
   const [isLoading, setIsLoading] = useState(false)
   const [summary, setSummary] = useState(null)
+  const [generationStage, setGenerationStage] = useState("")
+  const [generationProgress, setGenerationProgress] = useState(0)
 
   // UI feedback
   const [saveStatus, setSaveStatus] = useState(null)
@@ -314,6 +357,39 @@ export default function App() {
 
     const directMatch = extractClientName(sourceText)
     return cleanClientNameCandidate(directMatch)
+  }
+
+  // Updates a top-level summary field such as Signalment or CaseOverview
+  function updateSummaryField(field, value) {
+    setSummary((prev) => {
+      if (!prev) return prev
+
+      return {
+        ...prev,
+        [field]: value,
+      }
+    })
+  }
+
+  // Updates a visit-level field inside the structured summary
+  function updateVisitField(visitIndex, field, value) {
+    setSummary((prev) => {
+      if (!prev || !Array.isArray(prev.Visits)) return prev
+
+      const updatedVisits = prev.Visits.map((visit, index) => {
+        if (index !== visitIndex) return visit
+
+        return {
+          ...visit,
+          [field]: value,
+        }
+      })
+
+      return {
+        ...prev,
+        Visits: updatedVisits,
+      }
+    })
   }
 
   // ==============================
@@ -661,6 +737,16 @@ ${file.content}
   // Core Actions
   // ==============================
 
+  // Updates the loading UI so the bar and status text stay in sync
+  function setGenerationStageState(stageKey) {
+    const stage = GENERATION_STAGE_CONFIG[stageKey]
+
+    if (!stage) return
+
+    setGenerationStage(stage.label)
+    setGenerationProgress(stage.progress)
+  }
+  
   // Sends the source record text to the backend and stores the structured result
   async function handleGenerate() {
     try {
@@ -668,6 +754,12 @@ ${file.content}
       setSummary(null)
       setSaveStatus(null)
       setErrorMessage("")
+      setGenerationStageState("preparing")
+
+      // Briefly show the request preparation step before the API call begins
+      await new Promise((resolve) => setTimeout(resolve, 250))
+
+      setGenerationStageState("sending")
 
       const res = await fetch(`${API_BASE}/summarize`, {
         method: "POST",
@@ -678,6 +770,8 @@ ${file.content}
         }),
       })
 
+      setGenerationStageState("structuring")
+
       const data = await res.json()
 
       if (!res.ok) {
@@ -686,6 +780,11 @@ ${file.content}
 
       if (data.summary) {
         console.log("Generated summary response:", data.summary)
+
+        // Reflect the final UI update stage before rendering the completed summary
+        setGenerationStageState("finalizing")
+        await new Promise((resolve) => setTimeout(resolve, 250))
+
         setSummary(data.summary)
         setGeneratedDate(new Date().toLocaleString())
         return
@@ -705,6 +804,8 @@ ${file.content}
       )
     } finally {
       setIsLoading(false)
+      setGenerationStage("")
+      setGenerationProgress(0)
     }
   }
 
@@ -718,6 +819,8 @@ ${file.content}
     setGeneratedDate("")
     setUploadedFiles([])
     setOrganizationPreference("oldest")
+    setGenerationStage("")
+    setGenerationProgress(0)
   }
 
   // Saves the current summary, source text, and metadata to Firestore
@@ -1216,13 +1319,22 @@ ${file.content}
             {isLoading && (
               <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
                 <div className="text-sm font-medium text-white/80">
-                  Generating summary
+                  Generating Clinical summary
                 </div>
+
                 <div className="mt-2 text-xs text-white/60">
-                  Organizing the record into structured clinical sections for review.
+                  {generationStage || "Preparing request..."}
                 </div>
+
                 <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full w-2/3 animate-pulse rounded-full bg-indigo-500/70" />
+                  <div
+                    className="h-full animate-pulse rounded-full bg-indigo-500/80 transition-all duration-500 ease-out"
+                    style={{ width: `${generationProgress}%` }}
+                  />
+                </div>
+
+                <div className="mt-2 text-right text-[11px] text-white/40">
+                  {generationProgress}%
                 </div>
               </div>
             )}
@@ -1241,7 +1353,7 @@ ${file.content}
                 <h2 className="text-lg font-semibold">Structured Summary</h2>
                 <p className="mt-1 text-sm text-white/60">
                   Output organized into clinical sections for faster review and
-                  documentation.
+                  documentation. Fields can be edited before saving or exporting.
                 </p>
               </div>
 
@@ -1290,37 +1402,81 @@ ${file.content}
             {summary && (
               <div className="mt-5 max-h-[520px] overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/40 p-5">
                 <div className="space-y-6">
-                  <SummarySection title="Signalment" body={summary.Signalment} />
+                  <SummarySection
+                    title="Signalment"
+                    body={summary.Signalment}
+                    onChange={(value) => updateSummaryField("Signalment", value)}
+                  />
+
                   <SummarySection
                     title="Case Overview"
                     body={summary.CaseOverview}
+                    onChange={(value) => updateSummaryField("CaseOverview", value)}
                     isLast={!summary.Visits || summary.Visits.length === 0}
                   />
 
                   {sortedSummaryVisits.map((visit, index) => (
                     <div
-                      key={`${visit.VisitDate}-${index}`}
+                      key={`visit-${index}`}
                       className="rounded-xl border border-white/10 bg-white/5 p-4"
                     >
-                      <div className="mb-4 border-b border-white/10 pb-3">
-                        <div className="text-sm font-semibold text-white/90">
-                          {visit.VisitLabel || `Visit ${index + 1}`}
-                        </div>
-                        <div className="mt-1 text-xs text-white/50">
-                          {visit.VisitDate || "Date not provided"}
-                          {visit.Source ? ` • ${visit.Source}` : ""}
+                      <div className="mb-4 border-b border-white/10 pb-4">
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <div>
+                            <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                              Visit Label
+                            </label>
+                            <input
+                              type="text"
+                              value={visit.VisitLabel || ""}
+                              onChange={(e) =>
+                                updateVisitField(index, "VisitLabel", e.target.value)
+                              }
+                              className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                              placeholder={`Visit ${index + 1}`}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                              Visit Date
+                            </label>
+                            <input
+                              type="text"
+                              value={visit.VisitDate || ""}
+                              onChange={(e) =>
+                                updateVisitField(index, "VisitDate", e.target.value)
+                              }
+                              className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                              placeholder="Enter visit date..."
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                              Source
+                            </label>
+                            <input
+                              type="text"
+                              value={visit.Source || ""}
+                              onChange={(e) =>
+                                updateVisitField(index, "Source", e.target.value)
+                              }
+                              className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                              placeholder="Enter source clinic..."
+                            />
+                          </div>
                         </div>
                       </div>
 
                       <div className="space-y-4">
                         {VISIT_SECTION_ORDER.map((section, sectionIndex) => (
                           <SummarySection
-                            key={`${visit.VisitDate}-${section}-${sectionIndex}`}
+                            key={`visit-${index}-${section}`}
                             title={section}
                             body={visit[section]}
-                            isLast={
-                              sectionIndex === VISIT_SECTION_ORDER.length - 1
-                            }
+                            onChange={(value) => updateVisitField(index, section, value)}
+                            isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
                           />
                         ))}
                       </div>
