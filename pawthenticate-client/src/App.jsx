@@ -95,6 +95,21 @@ function SummarySection({
   )
 }
 
+// Read-only summary block used for quick review mode without editable scroll fields
+function ReadOnlySummarySection({ title, body, isLast = false }) {
+  return (
+    <div className={`${!isLast ? "border-b border-white/10 pb-4" : ""}`}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-white/50">
+        {title}
+      </div>
+
+      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-white/85">
+        {body || "—"}
+      </p>
+    </div>
+  )
+}
+
 // ==============================
 // Main Application Component
 // ==============================
@@ -119,6 +134,9 @@ export default function App() {
 
   // Preview modal
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+
+  // Controls whether the generated summary displays as a readable quick view or editable form
+  const [isEditingSummary, setIsEditingSummary] = useState(false)
 
   // Metadata
   const [generatedDate, setGeneratedDate] = useState("")
@@ -524,6 +542,7 @@ export default function App() {
     setSaveStatus(null)
     setErrorMessage("")
     setIsPreviewOpen(false)
+    setIsEditingSummary(false)
 
     window.scrollTo({
       top: 0,
@@ -755,6 +774,7 @@ ${file.content}
       setSaveStatus(null)
       setErrorMessage("")
       setGenerationStageState("preparing")
+      setIsEditingSummary(false)
 
       // Briefly show the request preparation step before the API call begins
       await new Promise((resolve) => setTimeout(resolve, 250))
@@ -821,6 +841,7 @@ ${file.content}
     setOrganizationPreference("oldest")
     setGenerationStage("")
     setGenerationProgress(0)
+    setIsEditingSummary(false)
   }
 
   // Saves the current summary, source text, and metadata to Firestore
@@ -1358,6 +1379,16 @@ ${file.content}
               </div>
 
               <div className="flex items-center gap-2">
+                
+                <button
+                  onClick={() => setIsEditingSummary((prev) => !prev)}
+                  disabled={!summary || isLoading}
+                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                >
+                  {isEditingSummary ? "Quick View" : "Edit Summary"}
+                </button>
+                
                 <button
                   onClick={() => setIsPreviewOpen(true)}
                   disabled={!summary || isLoading}
@@ -1400,88 +1431,160 @@ ${file.content}
             )}
 
             {summary && (
-              <div className="mt-5 max-h-[520px] overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/40 p-5">
+              <div
+                className={`mt-5 rounded-2xl border border-white/10 bg-neutral-950/40 p-5 ${
+                  isEditingSummary ? "max-h-[520px] overflow-y-auto" : ""
+                }`}
+              >
+                <div className="mb-4 rounded-xl border border-indigo-400/20 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
+                  {isEditingSummary
+                    ? "Edit Mode: Make corrections to the generated summary before saving or exporting."
+                    : "Quick View Mode: Review the generated clinical summary without editable scroll fields."}
+                </div>
+
                 <div className="space-y-6">
-                  <SummarySection
-                    title="Signalment"
-                    body={summary.Signalment}
-                    onChange={(value) => updateSummaryField("Signalment", value)}
-                  />
+                  {isEditingSummary ? (
+                    <>
+                      <SummarySection
+                        title="Signalment"
+                        body={summary.Signalment}
+                        onChange={(value) => updateSummaryField("Signalment", value)}
+                      />
 
-                  <SummarySection
-                    title="Case Overview"
-                    body={summary.CaseOverview}
-                    onChange={(value) => updateSummaryField("CaseOverview", value)}
-                    isLast={!summary.Visits || summary.Visits.length === 0}
-                  />
+                      <SummarySection
+                        title="Case Overview"
+                        body={summary.CaseOverview}
+                        onChange={(value) => updateSummaryField("CaseOverview", value)}
+                        isLast={!summary.Visits || summary.Visits.length === 0}
+                      />
 
-                  {sortedSummaryVisits.map((visit, index) => (
-                    <div
-                      key={`visit-${index}`}
-                      className="rounded-xl border border-white/10 bg-white/5 p-4"
-                    >
-                      <div className="mb-4 border-b border-white/10 pb-4">
-                        <div className="grid gap-3 md:grid-cols-3">
-                          <div>
-                            <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                              Visit Label
-                            </label>
-                            <input
-                              type="text"
-                              value={visit.VisitLabel || ""}
-                              onChange={(e) =>
-                                updateVisitField(index, "VisitLabel", e.target.value)
-                              }
-                              className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
-                              placeholder={`Visit ${index + 1}`}
-                            />
+                      {sortedSummaryVisits.map((visit, index) => (
+                        <div
+                          key={`visit-edit-${index}`}
+                          className="rounded-xl border border-indigo-400/20 bg-white/5 p-4 shadow-lg shadow-black/10"
+                        >
+                          <div className="mb-4 border-b border-white/10 pb-4">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                                  Visit {index + 1}
+                                </div>
+                                <div className="mt-1 text-sm text-white/60">
+                                  Edit visit metadata and clinical section details.
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <div>
+                                <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                                  Visit Label
+                                </label>
+                                <input
+                                  type="text"
+                                  value={visit.VisitLabel || ""}
+                                  onChange={(e) =>
+                                    updateVisitField(index, "VisitLabel", e.target.value)
+                                  }
+                                  className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                                  placeholder={`Visit ${index + 1}`}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                                  Visit Date
+                                </label>
+                                <input
+                                  type="text"
+                                  value={visit.VisitDate || ""}
+                                  onChange={(e) =>
+                                    updateVisitField(index, "VisitDate", e.target.value)
+                                  }
+                                  className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                                  placeholder="Enter visit date..."
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                                  Source
+                                </label>
+                                <input
+                                  type="text"
+                                  value={visit.Source || ""}
+                                  onChange={(e) =>
+                                    updateVisitField(index, "Source", e.target.value)
+                                  }
+                                  className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                                  placeholder="Enter source clinic..."
+                                />
+                              </div>
+                            </div>
                           </div>
 
-                          <div>
-                            <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                              Visit Date
-                            </label>
-                            <input
-                              type="text"
-                              value={visit.VisitDate || ""}
-                              onChange={(e) =>
-                                updateVisitField(index, "VisitDate", e.target.value)
-                              }
-                              className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
-                              placeholder="Enter visit date..."
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
-                              Source
-                            </label>
-                            <input
-                              type="text"
-                              value={visit.Source || ""}
-                              onChange={(e) =>
-                                updateVisitField(index, "Source", e.target.value)
-                              }
-                              className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
-                              placeholder="Enter source clinic..."
-                            />
+                          <div className="space-y-4">
+                            {VISIT_SECTION_ORDER.map((section, sectionIndex) => (
+                              <SummarySection
+                                key={`visit-edit-${index}-${section}`}
+                                title={section}
+                                body={visit[section]}
+                                onChange={(value) => updateVisitField(index, section, value)}
+                                isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
+                              />
+                            ))}
                           </div>
                         </div>
-                      </div>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <ReadOnlySummarySection title="Signalment" body={summary.Signalment} />
 
-                      <div className="space-y-4">
-                        {VISIT_SECTION_ORDER.map((section, sectionIndex) => (
-                          <SummarySection
-                            key={`visit-${index}-${section}`}
-                            title={section}
-                            body={visit[section]}
-                            onChange={(value) => updateVisitField(index, section, value)}
-                            isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                      <ReadOnlySummarySection
+                        title="Case Overview"
+                        body={summary.CaseOverview}
+                        isLast={!summary.Visits || summary.Visits.length === 0}
+                      />
+
+                      {sortedSummaryVisits.map((visit, index) => (
+                        <div
+                          key={`visit-readonly-${index}`}
+                          className="rounded-2xl border border-indigo-400/20 bg-white/5 p-5 shadow-lg shadow-black/10"
+                        >
+                          <div className="mb-5 border-b border-white/10 pb-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                                  Visit {index + 1}
+                                </div>
+
+                                <h3 className="mt-1 text-lg font-semibold text-white">
+                                  {visit.VisitLabel || `Visit ${index + 1}`}
+                                </h3>
+                              </div>
+
+                              <div className="text-right text-xs text-white/50">
+                                <div>{visit.VisitDate || "Date not provided"}</div>
+                                <div>{visit.Source || "Source not provided"}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            {VISIT_SECTION_ORDER.map((section, sectionIndex) => (
+                              <ReadOnlySummarySection
+                                key={`visit-readonly-${index}-${section}`}
+                                title={section}
+                                body={visit[section]}
+                                isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               </div>
             )}
