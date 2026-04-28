@@ -205,6 +205,9 @@ Requirements:
 - If uncertainty is medically relevant, rewrite it in a professional manner.
 - Do NOT invent diagnostics, treatments, or findings that are not supported by the source text.
 - If a section is missing, return an empty string.
+- Convert all patient weights to kilograms using kg = lb / 2.20462 when weights are provided in pounds.
+- Display converted weights in this format: "35.7 kg" and include the original value in parentheses only if clinically helpful, such as "35.7 kg (78.6 lb)".
+- Prefer kilograms as the primary weight unit in all signalment and clinical summary sections.
 
 Style Guidelines:
 - Use concise, professional clinical phrasing.

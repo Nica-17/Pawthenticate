@@ -132,6 +132,9 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState(null)
   const [errorMessage, setErrorMessage] = useState("")
 
+  // Tracks which visit cards are expanded in quick view mode
+  const [expandedVisits, setExpandedVisits] = useState({})
+
   // Preview modal
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
 
@@ -410,6 +413,14 @@ export default function App() {
     })
   }
 
+  // Toggles a visit card open or closed in quick view mode
+  function toggleVisitExpanded(index) {
+    setExpandedVisits((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }))
+  }
+
   // ==============================
   // Derived Display Values
   // ==============================
@@ -543,6 +554,7 @@ export default function App() {
     setErrorMessage("")
     setIsPreviewOpen(false)
     setIsEditingSummary(false)
+    setExpandedVisits({})
 
     window.scrollTo({
       top: 0,
@@ -775,6 +787,7 @@ ${file.content}
       setErrorMessage("")
       setGenerationStageState("preparing")
       setIsEditingSummary(false)
+      setExpandedVisits({})
 
       // Briefly show the request preparation step before the API call begins
       await new Promise((resolve) => setTimeout(resolve, 250))
@@ -842,6 +855,7 @@ ${file.content}
     setGenerationStage("")
     setGenerationProgress(0)
     setIsEditingSummary(false)
+    setExpandedVisits({})
   }
 
   // Saves the current summary, source text, and metadata to Firestore
@@ -1432,14 +1446,12 @@ ${file.content}
 
             {summary && (
               <div
-                className={`mt-5 rounded-2xl border border-white/10 bg-neutral-950/40 p-5 ${
-                  isEditingSummary ? "max-h-[520px] overflow-y-auto" : ""
-                }`}
+                className="mt-5 max-h-[520px] overflow-y-auto rounded-2xl border border-white/10 bg-neutral-950/40 p-5"
               >
                 <div className="mb-4 rounded-xl border border-indigo-400/20 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
                   {isEditingSummary
-                    ? "Edit Mode: Make corrections to the generated summary before saving or exporting."
-                    : "Quick View Mode: Review the generated clinical summary without editable scroll fields."}
+                    ? "Edit Mode: Update fields before saving or exporting."
+                    : "Quick View Mode: Review the generated clinical summary."}
                 </div>
 
                 <div className="space-y-6">
@@ -1547,42 +1559,56 @@ ${file.content}
                         isLast={!summary.Visits || summary.Visits.length === 0}
                       />
 
-                      {sortedSummaryVisits.map((visit, index) => (
-                        <div
-                          key={`visit-readonly-${index}`}
-                          className="rounded-2xl border border-indigo-400/20 bg-white/5 p-5 shadow-lg shadow-black/10"
-                        >
-                          <div className="mb-5 border-b border-white/10 pb-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">
-                                  Visit {index + 1}
+                      {sortedSummaryVisits.map((visit, index) => {
+                        const isExpanded = expandedVisits[index] ?? false
+
+                        return (
+                          <div
+                            key={`visit-readonly-${index}`}
+                            className="rounded-2xl border border-indigo-400/20 bg-white/5 shadow-lg shadow-black/10"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleVisitExpanded(index)}
+                              className="w-full p-5 text-left hover:bg-white/[0.03]"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                                    Visit {index + 1}
+                                  </div>
+
+                                  <h3 className="mt-2 text-lg font-semibold leading-snug text-white">
+                                    {visit.VisitLabel || `Visit ${index + 1}`}
+                                  </h3>
+
+                                  <div className="mt-3 text-xs leading-relaxed text-white/45">
+                                    <div>{visit.VisitDate || "Date not provided"}</div>
+                                    <div>{visit.Source || "Source not provided"}</div>
+                                  </div>
                                 </div>
 
-                                <h3 className="mt-1 text-lg font-semibold text-white">
-                                  {visit.VisitLabel || `Visit ${index + 1}`}
-                                </h3>
+                                <span className="mt-1 shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/60">
+                                  {isExpanded ? "Collapse ▲" : "Expand ▼"}
+                                </span>
                               </div>
+                            </button>
 
-                              <div className="text-right text-xs text-white/50">
-                                <div>{visit.VisitDate || "Date not provided"}</div>
-                                <div>{visit.Source || "Source not provided"}</div>
+                            {isExpanded && (
+                              <div className="space-y-4 border-t border-white/10 px-5 pb-5 pt-4">
+                                {VISIT_SECTION_ORDER.map((section, sectionIndex) => (
+                                  <ReadOnlySummarySection
+                                    key={`visit-readonly-${index}-${section}`}
+                                    title={section}
+                                    body={visit[section]}
+                                    isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
+                                  />
+                                ))}
                               </div>
-                            </div>
+                            )}
                           </div>
-
-                          <div className="space-y-4">
-                            {VISIT_SECTION_ORDER.map((section, sectionIndex) => (
-                              <ReadOnlySummarySection
-                                key={`visit-readonly-${index}-${section}`}
-                                title={section}
-                                body={visit[section]}
-                                isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </>
                   )}
                 </div>
