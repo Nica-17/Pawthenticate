@@ -1246,6 +1246,19 @@ ${file.content}
 
       {/* Main */}
       <main className="mx-auto max-w-6xl px-6 py-8">
+
+        {/* Demo Environment Notice */}
+        <section className="mb-6 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4">
+          <div className="text-sm font-semibold text-amber-100">
+            Demo Environment Notice
+          </div>
+
+          <p className="mt-1 text-sm leading-relaxed text-amber-100/80">
+            This application is a proof-of-concept demonstration. Use only mock or
+            de-identified records. Do not enter real patient, client, or clinic-sensitive data.
+          </p>
+        </section>
+
         {/* Main Layout - Input (left) and Output (right) panels */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Input Panel */}
@@ -1312,8 +1325,8 @@ ${file.content}
                     onChange={(e) => setOrganizationPreference(e.target.value)}
                     className="mt-1 block rounded-xl border border-white/10 bg-neutral-950/60 px-3 py-2 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                   >
-                    <option value="oldest">Chronological: Oldest to Newest</option>
-                    <option value="newest">Chronological: Newest to Oldest</option>
+                    <option value="oldest">Oldest to Newest</option>
+                    <option value="newest">Newest to Oldest</option>
                   </select>
                 </div>
 
