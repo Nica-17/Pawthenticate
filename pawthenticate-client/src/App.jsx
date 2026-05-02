@@ -1318,16 +1318,23 @@ ${file.content}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <label className="text-xs font-medium text-white/60">
-                    Organization preference
+                    Sort Order
                   </label>
-                  <select
-                    value={organizationPreference}
-                    onChange={(e) => setOrganizationPreference(e.target.value)}
-                    className="mt-1 block rounded-xl border border-white/10 bg-neutral-950/60 px-3 py-2 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
-                  >
-                    <option value="oldest">Oldest to Newest</option>
-                    <option value="newest">Newest to Oldest</option>
-                  </select>
+
+                  <div className="relative mt-1">
+                    <select
+                      value={organizationPreference}
+                      onChange={(e) => setOrganizationPreference(e.target.value)}
+                      className="appearance-none w-full rounded-xl border border-white/10 bg-neutral-950/60 py-2 pl-4 pr-12 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                    >
+                      <option value="oldest">Oldest First</option>
+                      <option value="newest">Newest First</option>
+                    </select>
+
+                    <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-white/40">
+                      <span className="text-xs">▼</span>
+                    </div>
+                  </div>
                 </div>
 
                 {uploadedFiles.length > 0 && (
@@ -1679,15 +1686,15 @@ ${file.content}
                 <select
                   value={sortOption}
                   onChange={(e) => setSortOption(e.target.value)}
-                  className="appearance-none rounded-xl border border-white/10 bg-neutral-950/60 py-2 pl-4 pr-10 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                  className="appearance-none rounded-xl border border-white/10 bg-neutral-950/60 py-2 pl-4 pr-12 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                 >
                   <option value="newest">Newest First</option>
                   <option value="oldest">Oldest First</option>
                   <option value="name">Patient Name</option>
                 </select>
 
-                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-white/40">
-                  ▼
+                <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-white/40">
+                  <span className="text-xs">▼</span>
                 </div>
               </div>
             </div>
