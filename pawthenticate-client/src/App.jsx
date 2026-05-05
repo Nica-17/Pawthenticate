@@ -144,6 +144,14 @@ export default function App() {
   // Metadata
   const [generatedDate, setGeneratedDate] = useState("")
 
+  // Allows manual override of inferred patient, client, and species values
+  // Used when AI or raw text parsing does not correctly identify these fields
+  const [caseMetadata, setCaseMetadata] = useState({
+    patientName: "",
+    clientName: "",
+    species: "",
+  })
+
   // Saved cases
   const [savedCases, setSavedCases] = useState([])
   const [isLoadingCases, setIsLoadingCases] = useState(false)
@@ -380,6 +388,14 @@ export default function App() {
     return cleanClientNameCandidate(directMatch)
   }
 
+  // Updates a top-level metadata field such as patient name, client name, or species
+  function updateCaseMetadataField(field, value) {
+    setCaseMetadata((prev) => ({
+      ...prev,
+      [field]: value,
+    }))
+  }
+
   // Updates a top-level summary field such as Signalment or CaseOverview
   function updateSummaryField(field, value) {
     setSummary((prev) => {
@@ -425,18 +441,32 @@ export default function App() {
   // Derived Display Values
   // ==============================
 
-  // Prefer signalment-based extraction first, then fall back to raw record text
-  const patientName =
+  // Derives patient, client, and species values for display and export
+  // Falls back to inferred values unless manually overridden by the user
+  const inferredPatientName =
     inferPatientNameFromSignalment(summary?.Signalment) ||
     inferPatientName(recordText) ||
     "Unknown Patient"
 
-  const clientName = inferClientName(recordText) || "Unknown Client"
-  const species = inferSpeciesFromSignalment(summary?.Signalment) || "Unknown"
+  const inferredClientName =
+    inferClientName(recordText) || "Unknown Client"
+
+  const inferredSpecies =
+    inferSpeciesFromSignalment(summary?.Signalment) || "Unknown"
+
+  // Prefer user-edited metadata values when available
+  const patientName = caseMetadata.patientName || inferredPatientName
+  const clientName = caseMetadata.clientName || inferredClientName
+  const species = caseMetadata.species || inferredSpecies
 
   // Reorders visit summaries to match the selected timeline preference
   const sortedSummaryVisits = Array.isArray(summary?.Visits)
-    ? [...summary.Visits].sort((a, b) => {
+  ? summary.Visits
+      .map((visit, originalIndex) => ({
+        ...visit,
+        originalIndex,
+      }))
+      .sort((a, b) => {
         const dateA = new Date(a.VisitDate).getTime() || 0
         const dateB = new Date(b.VisitDate).getTime() || 0
 
@@ -446,7 +476,7 @@ export default function App() {
 
         return dateB - dateA
       })
-    : []
+  : []
 
   const filteredAndSortedCases = [...savedCases]
     .filter((savedCase) => {
@@ -674,8 +704,6 @@ export default function App() {
               isEvalSupported: false,
             }).promise
 
-            console.log("PDF loaded successfully. Pages:", pdf.numPages)
-
             let pdfText = ""
 
             for (let i = 1; i <= pdf.numPages; i++) {
@@ -700,7 +728,6 @@ export default function App() {
 
             text = normalizeDocxText(result.value)
 
-            console.log("Normalized DOCX text:", text)
           }
 
           return {
@@ -812,7 +839,6 @@ ${file.content}
       }
 
       if (data.summary) {
-        console.log("Generated summary response:", data.summary)
 
         // Reflect the final UI update stage before rendering the completed summary
         setGenerationStageState("finalizing")
@@ -856,6 +882,12 @@ ${file.content}
     setGenerationProgress(0)
     setIsEditingSummary(false)
     setExpandedVisits({})
+    // Reset manually edited metadata values
+    setCaseMetadata({
+      patientName: "",
+      clientName: "",
+      species: "",
+    })
   }
 
   // Saves the current summary, source text, and metadata to Firestore
@@ -865,8 +897,6 @@ ${file.content}
     try {
       setSaveStatus(null)
       setErrorMessage("")
-
-      console.log("Saving clientName:", clientName)
 
       const res = await fetch(`${API_BASE}/api/cases`, {
         method: "POST",
@@ -907,8 +937,6 @@ ${file.content}
 
       const res = await fetch(`${API_BASE}/api/cases`)
       const data = await res.json()
-
-      console.log("Saved cases response:", data)
 
       if (!res.ok) {
         throw new Error(data?.error || "Failed to load saved cases.")
@@ -1374,7 +1402,7 @@ ${file.content}
             {isLoading && (
               <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
                 <div className="text-sm font-medium text-white/80">
-                  Generating Clinical summary
+                  Generating clinical summary
                 </div>
 
                 <div className="mt-2 text-xs text-white/60">
@@ -1477,6 +1505,68 @@ ${file.content}
                 <div className="space-y-6">
                   {isEditingSummary ? (
                     <>
+
+                      {/* Editable metadata fields for correcting inferred patient, client, and species values */}
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                          Case Metadata
+                        </div>
+
+                        <p className="mt-1 text-sm text-white/60">
+                          Edit patient, client, or species information before saving or exporting.
+                        </p>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          {/* Patient Name */}
+                            <div>
+                              <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                                Patient
+                              </label>
+                              <input
+                                type="text"
+                                value={patientName}
+                                onChange={(e) =>
+                                  updateCaseMetadataField("patientName", e.target.value)
+                                }
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                                placeholder="Enter patient name..."
+                              />
+                            </div>
+
+                            {/* Client Name */}
+                            <div>
+                              <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                                Client
+                              </label>
+                              <input
+                                type="text"
+                                value={clientName}
+                                onChange={(e) =>
+                                  updateCaseMetadataField("clientName", e.target.value)
+                                }
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                                placeholder="Enter client name..."
+                              />
+                            </div>
+
+                            {/* Species */}
+                            <div>
+                              <label className="text-xs font-semibold uppercase tracking-wide text-white/50">
+                                Species
+                              </label>
+                              <input
+                                type="text"
+                                value={species}
+                                onChange={(e) =>
+                                  updateCaseMetadataField("species", e.target.value)
+                                }
+                                className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
+                                placeholder="Enter species..."
+                              />
+                            </div>
+                          </div>
+                        </div>
+
                       <SummarySection
                         title="Signalment"
                         body={summary.Signalment}
@@ -1516,7 +1606,7 @@ ${file.content}
                                   type="text"
                                   value={visit.VisitLabel || ""}
                                   onChange={(e) =>
-                                    updateVisitField(index, "VisitLabel", e.target.value)
+                                    updateVisitField(visit.originalIndex, "VisitLabel", e.target.value)
                                   }
                                   className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                                   placeholder={`Visit ${index + 1}`}
@@ -1531,7 +1621,7 @@ ${file.content}
                                   type="text"
                                   value={visit.VisitDate || ""}
                                   onChange={(e) =>
-                                    updateVisitField(index, "VisitDate", e.target.value)
+                                    updateVisitField(visit.originalIndex, "VisitDate", e.target.value)
                                   }
                                   className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                                   placeholder="Enter visit date..."
@@ -1546,7 +1636,7 @@ ${file.content}
                                   type="text"
                                   value={visit.Source || ""}
                                   onChange={(e) =>
-                                    updateVisitField(index, "Source", e.target.value)
+                                    updateVisitField(visit.originalIndex, "Source", e.target.value)
                                   }
                                   className="mt-2 w-full rounded-xl border border-white/10 bg-neutral-950/60 p-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                                   placeholder="Enter source clinic..."
@@ -1561,7 +1651,7 @@ ${file.content}
                                 key={`visit-edit-${index}-${section}`}
                                 title={section}
                                 body={visit[section]}
-                                onChange={(value) => updateVisitField(index, section, value)}
+                                onChange={(value) => updateVisitField(visit.originalIndex, section, value)}
                                 isLast={sectionIndex === VISIT_SECTION_ORDER.length - 1}
                               />
                             ))}
